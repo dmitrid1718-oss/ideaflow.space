@@ -165,7 +165,7 @@ li.snap span{color:var(--soft);font-size:.9rem}
     <p class="chips" id="chips"><button type="button" data-cmd="/suggest">/suggest</button><button type="button" data-cmd="/adopt">/adopt</button><button type="button" data-cmd="/fade">/fade</button><button type="button" data-cmd="/save">/save</button><button type="button" data-cmd="/left">/left</button><button type="button" data-cmd="/right">/right</button><button type="button" data-cmd="/new">/new</button><button type="button" data-cmd="/fit">/fit</button><button type="button" data-cmd="/in">/in</button><button type="button" data-cmd="/out">/out</button></p>
   </div>
   <p id="status" role="status"></p>
-  <p class="note">About the AI: suggestions come from Claude, an AI model made by Anthropic. When you use /suggest, the page sends Claude the path of thoughts leading to the selected branch, plus the branches already there, and asks for three connections. Nothing else is sent. You may be asked to approve the connection the first time. If Claude isn’t available, the page uses built-in prompts and says so. Suggestions are only ideas: nothing joins your map until you adopt it. Snapshots stay in this browser.</p>
+  <p class="note">About AI: <strong id="if-ai-state">Checking connection…</strong> When available, Claude Haiku generates three suggestions for a selected branch. The idea path and existing branches are sent to Anthropic through a secure server function. If API credits or the connection are unavailable, built-in prompts work offline. No AI key is stored in this page. Limit: 20 AI requests per hour per visitor (best effort).</p>
 </section>
 
 
@@ -241,21 +241,18 @@ var busy=false;
 async function suggest(){
  if(busy)return;var n=get(sel);if(!n)return;
  var path=[],c=n;while(c){path.unshift(c.text);c=c.parent===null?null:get(c.parent)}
- var have=kids(n.id).map(function(k){return k.text}),sample=null;
- try{sample=await claude.use("sample")}catch(e){}
- if(!sample){fallback(n,"Claude isn’t available here, so these come from built-in prompts.");return}
- busy=true;var b=document.querySelector('[data-act="sug"]');if(b){b.disabled=true;b.textContent="Asking Claude…"}status("Asking Claude for connections…");
+ var have=kids(n.id).map(function(k){return k.text});
+ busy=true;var b=document.querySelector('[data-act="sug"]');if(b){b.disabled=true;b.textContent="Asking AI…"}
+ status("Looking for new connections…");
  try{
-  var r=await sample.json("You are helping someone explore an idea as a branching map. Below is the path from their starting thought down to the branch they are looking at. Suggest 3 connections that branch off the last item. Each should open a different direction, be surprising but relevant, avoid obvious synonyms, and be at most 8 words. Do not repeat the existing branches. Return only a JSON array of 3 strings.\n\nPath: "+JSON.stringify(path)+"\nExisting branches: "+JSON.stringify(have));
-  var got=(Array.isArray(r)?r:[]).filter(function(x){return typeof x==="string"&&x.trim()}).slice(0,3);
+  var response=await fetch("/api/suggest",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({path:path,existing:have})});
+  if(!response.ok)throw {code:response.status===429?"rate_limited":"offline"};
+  var data=await response.json(),got=(Array.isArray(data.suggestions)?data.suggestions:[]).filter(function(x){return typeof x==="string"&&x.trim()}).slice(0,3);
   if(!got.length)throw {code:"empty"};
   got.forEach(function(x){var s=add(short(x.trim(),70),n.id,"suggest",-1);s.ai=true});
-  busy=false;render();status(got.length+" suggestions from Claude. Adopt the ones you want.")
+  busy=false;render();status(got.length+" live Claude suggestions. Adopt the ones you want.");
  }catch(err){
-  busy=false;var code=err&&err.code;
-  if(code==="rate_limited"){panel();status("Too many requests right now. Try again in a moment.")}
-  else if(code==="not_granted"){fallback(n,"Claude suggestions weren’t approved, so these come from built-in prompts.")}
-  else{fallback(n,"Claude couldn’t answer just now, so these come from built-in prompts.")}
+  busy=false;fallback(n,err&&err.code==="rate_limited"?"AI request limit reached; showing offline suggestions.":"Claude is offline or not yet funded; showing built-in suggestions.");
  }}
 function save(){var root=nodes.filter(function(n){return n.parent===null})[0];if(!root){status("Start a current first, then save a snapshot.");return}
  snaps.push({t:Date.now(),seed:root.text,n:nodes.length,nodes:JSON.parse(JSON.stringify(nodes))});
@@ -351,5 +348,6 @@ render();list();
   }
 })();
 </script>
+<script>fetch("/api/suggest").then(r=>r.json()).then(d=>{var e=document.getElementById("if-ai-state");if(e)e.textContent=d.connected?"Live AI connected":"Offline suggestions — API key not configured";}).catch(()=>{var e=document.getElementById("if-ai-state");if(e)e.textContent="Offline suggestions";});</script>
 </body>
 </html>
