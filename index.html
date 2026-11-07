@@ -246,7 +246,7 @@ async function suggest(){
  status("Looking for new connections…");
  try{
   var response=await fetch("/api/suggest",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({path:path,existing:have})});
-  if(!response.ok){var failure=await response.json().catch(function(){return {error:"http_"+response.status}});throw {code:failure.error||"http_"+response.status};}
+  if(!response.ok){var failure=await response.json().catch(function(){return {error:"http_"+response.status}});throw {code:(failure.error||"http_"+response.status)+(failure.diagnosis?" / "+failure.diagnosis:"")};}
   var data=await response.json(),got=(Array.isArray(data.suggestions)?data.suggestions:[]).filter(function(x){return typeof x==="string"&&x.trim()}).slice(0,3);
   if(!got.length)throw {code:"empty"};
   got.forEach(function(x){var s=add(short(x.trim(),70),n.id,"suggest",-1);s.ai=true});
