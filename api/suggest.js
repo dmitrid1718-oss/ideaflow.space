@@ -22,10 +22,20 @@ export default async function handler(req,res){
   if(!r.ok){
    let providerError={};
    try{providerError=await r.json()}catch{}
-   const message=String(providerError?.error?.message||"").slice(0,400).replace(/sk-ant-[^\\s"'<>]+/g,"[redacted-key]");
-   console.error("Ideaflow Anthropic API error:",JSON.stringify({httpStatus:r.status,type:providerError?.error?.type||"unknown",message}));
+   const message=String(providerError?.error?.message||"").slice(0,300);
+   // Use stable error categories, not the raw upstream message or user-submitted content.
+   const diagnosis= /credit|balance|billing|fund|payment|spend|prepaid/i.test(message)?"credits_or_billing":
+     /model|not found|not available|unsupported model/i.test(message)?"model_not_available":
+     /max_tokens|token limit|output tokens/i.test(message)?"output_token_parameter":
+     /temperature|sampling|parameter/i.test(message)?"unsupported_parameter":
+     /permission|organization|workspace|access|role/i.test(message)?"workspace_access":
+     /overloaded|capacity/i.test(message)?"provider_capacity":
+     /invalid api key|authentication|authorization/i.test(message)?"authentication":
+     /content|too long|size/i.test(message)?"request_content":
+     "unknown_provider_rejection";
+   console.error("Ideaflow Anthropic API error:",JSON.stringify({httpStatus:r.status,type:providerError?.error?.type||"unknown",diagnosis:diagnosis}));
    const code=r.status===401?"api_key_rejected":r.status===403?"api_access_denied":r.status===402?"billing_required":r.status===429?"upstream_rate_limited":r.status===400?"provider_request_rejected":"provider_unavailable";
-   return reply(res,r.status===429?429:502,{error:code});
+   return reply(res,r.status===429?429:502,{error:code,diagnosis:diagnosis});
   }
   const data=await r.json(),txt=(data.content||[]).filter(x=>x.type==="text").map(x=>x.text).join(""),match=txt.match(/\[[\s\S]*?\]/);
   if(!match)return reply(res,502,{error:"invalid_model_response"});
