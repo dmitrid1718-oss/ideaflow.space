@@ -246,13 +246,13 @@ async function suggest(){
  status("Looking for new connections…");
  try{
   var response=await fetch("/api/suggest",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({path:path,existing:have})});
-  if(!response.ok)throw {code:response.status===429?"rate_limited":"offline"};
+  if(!response.ok){var failure=await response.json().catch(function(){return {error:"http_"+response.status}});throw {code:failure.error||"http_"+response.status};}
   var data=await response.json(),got=(Array.isArray(data.suggestions)?data.suggestions:[]).filter(function(x){return typeof x==="string"&&x.trim()}).slice(0,3);
   if(!got.length)throw {code:"empty"};
   got.forEach(function(x){var s=add(short(x.trim(),70),n.id,"suggest",-1);s.ai=true});
   busy=false;render();status(got.length+" live Claude suggestions. Adopt the ones you want.");
  }catch(err){
-  busy=false;fallback(n,err&&err.code==="rate_limited"?"AI request limit reached; showing offline suggestions.":"Claude is offline or not yet funded; showing built-in suggestions.");
+  busy=false;var why=err&&err.code||"network_failure";fallback(n,"Live AI request failed ("+why+"); using built-in suggestions.");
  }}
 function save(){var root=nodes.filter(function(n){return n.parent===null})[0];if(!root){status("Start a current first, then save a snapshot.");return}
  snaps.push({t:Date.now(),seed:root.text,n:nodes.length,nodes:JSON.parse(JSON.stringify(nodes))});
