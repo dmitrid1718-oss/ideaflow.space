@@ -21,7 +21,7 @@
 .if-value-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:22px}
 .if-result{margin:18px 0 0;padding:16px;border:1px solid var(--line);border-radius:6px;background:var(--surf)}
 .if-result p{margin:4px 0}
-.if-history{margin-top:24px;display:grid;gap:10px}
+.if-compass-chart{margin:16px 0;padding:15px;border:1px solid var(--line);border-radius:6px;background:var(--surf)}.if-compass-row{display:grid;grid-template-columns:minmax(105px,155px) 1fr;gap:10px;align-items:center;margin:8px 0;font-size:.8rem}.if-compass-bars{display:flex;flex-direction:column;gap:3px}.if-compass-bars div{height:7px;background:var(--line);border-radius:4px;overflow:hidden}.if-compass-bars i{display:block;height:7px}.if-compass-legend{font-size:.8rem;color:var(--soft);margin:8px 0}.if-compass-compare{border-top:1px solid var(--line);margin-top:16px;padding-top:13px}.if-compass-save{color:var(--soft);font-size:.8rem;margin:9px 0}.if-history{margin-top:24px;display:grid;gap:10px}
 .if-history article{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding:12px 0}
 .if-history small{color:var(--soft)}
 .if-history button{font-size:.85rem}
@@ -178,7 +178,7 @@ li.snap span{color:var(--soft);font-size:.9rem}
     <div id="if-value-rows"></div>
   </div>
   <div class="if-value-actions"><button class="btn" id="if-save-values" type="button">Save this calibration</button><button class="btn alt" id="if-export-values" type="button">Export data</button><button class="btn alt" id="if-reset-values" type="button">Reset sliders</button></div>
-  <div class="if-result" id="if-value-result" role="status" aria-live="polite">Set the sliders to explore which priorities have moved. All values start neutral.</div>
+  <div class="if-result" id="if-value-result" role="status" aria-live="polite">Set the sliders to explore which priorities have moved. All values start neutral.</div><div id="if-compass-chart" class="if-compass-chart" aria-label="Value rating visual comparison"></div><p id="if-compass-save" class="if-compass-save" role="status">Changes are not saved until you select Save.</p>
   <h3 style="margin:30px 0 8px">Previous calibrations</h3>
   <p class="if-more">Check-ins are stored only in this browser. Clearing browser storage removes them. Export a copy if you want to preserve your history.</p>
   <div id="if-value-history" class="if-history"></div>
@@ -301,53 +301,121 @@ render();list();
 
 <script id="value-compass-script">
 (function(){
-  "use strict";
-  var names=["Freedom","Security","Creativity","Family & connection","Contribution","Discovery","Health","Competence","Belonging","Meaning"];
-  var key="ideaflow:value-compass:v1",form=document.getElementById("if-value-rows"),result=document.getElementById("if-value-result"),history=document.getElementById("if-value-history");
-  var defaults=function(){return names.map(function(){return [5,5,5]})};
-  var values=defaults(),entries=[];
-  try{var prev=JSON.parse(localStorage.getItem(key)||"[]");if(Array.isArray(prev))entries=prev.filter(function(e){return e&&Array.isArray(e.scores)&&e.scores.length===names.length})}catch(e){}
-  function escapeHTML(s){return String(s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
-  function draw(){
-    form.innerHTML=names.map(function(n,i){return '<div class="if-value-head if-value-line"><label>'+escapeHTML(n)+'</label>'+values[i].map(function(v,j){return '<div><input type="range" min="0" max="10" step="1" data-i="'+i+'" data-j="'+j+'" value="'+v+'" aria-label="'+escapeHTML(n)+': '+["five years ago","today","in action"][j]+'"><output>'+v+'</output></div>'}).join("")+'</div>'}).join("");
-    summary();showHistory();
-  }
-  function summary(){
-    var shifts=names.map(function(n,i){return {name:n,delta:values[i][1]-values[i][0],gap:values[i][1]-values[i][2]}}).filter(function(x){return x.delta!==0}).sort(function(a,b){return Math.abs(b.delta)-Math.abs(a.delta)});
-    var gaps=names.map(function(n,i){return {name:n,gap:values[i][1]-values[i][2]}}).filter(function(x){return x.gap>=3}).sort(function(a,b){return b.gap-a.gap});
-    result.innerHTML='<strong>Compass reading</strong><p>'+(shifts.length?'Largest recalled shifts: '+shifts.slice(0,4).map(function(x){return escapeHTML(x.name)+' ('+(x.delta>0?'+':'')+x.delta+')'}).join(' · '):'No movement recorded between past and present yet.')+'</p><p>'+(gaps.length?'Possible values/action gaps: '+gaps.slice(0,3).map(function(x){return escapeHTML(x.name)+' ('+x.gap+' points)').join(' · '):'No large positive values/action gaps marked.')+'</p><small>These are patterns in your own ratings, not predictions or objective scores.</small>';
-  }
-  function showHistory(){
-    if(!entries.length){history.innerHTML='<p class="none">No saved calibrations yet.</p>';return}
-    history.innerHTML=entries.slice().reverse().map(function(e,rev){var index=entries.length-1-rev;return '<article><div><strong>'+new Date(e.date).toLocaleDateString()+'</strong><br><small>'+names.length+' values recorded</small></div><button class="btn alt" data-restore="'+index+'" type="button">Compare / load</button></article>'}).join("");
-  }
-  form.addEventListener("input",function(e){
-    var t=e.target;if(!t.matches('input[type="range"]'))return;
-    values[+t.dataset.i][+t.dataset.j]=+t.value;t.nextElementSibling.textContent=t.value;summary();
+"use strict";
+var names=["Freedom","Security","Creativity","Family & connection","Contribution","Discovery","Health","Competence","Belonging","Meaning"];
+var storageKey="ideaflow:value-compass:v1";
+var form=document.getElementById("if-value-rows");
+var result=document.getElementById("if-value-result");
+var history=document.getElementById("if-value-history");
+var chart=document.getElementById("if-compass-chart");
+var saveState=document.getElementById("if-compass-save");
+var values=names.map(function(){return [5,5,5];});
+var entries=[],compared=null;
+try{
+ var saved=JSON.parse(localStorage.getItem(storageKey)||"[]");
+ if(Array.isArray(saved))entries=saved.filter(function(e){return e&&e.date&&Array.isArray(e.scores)&&e.scores.length===names.length&&e.scores.every(function(row){return Array.isArray(row)&&row.length===3&&row.every(function(v){return Number.isFinite(v)&&v>=0&&v<=10;});});});
+}catch(_){}
+function escapeText(s){return String(s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
+function draw(){
+ form.innerHTML=names.map(function(name,i){
+  return '<div class="if-value-head if-value-line"><label>'+escapeText(name)+'</label>'+
+   values[i].map(function(v,j){return '<div><input type="range" min="0" max="10" step="1" data-i="'+i+'" data-j="'+j+'" value="'+v+'" aria-label="'+escapeText(name)+': '+["five years ago","today","in action"][j]+'"><output>'+v+'</output></div>';}).join("")+'</div>';
+ }).join("");
+ summary();drawChart();drawHistory();
+}
+function summary(){
+ var shifts=names.map(function(name,i){return {name:name,delta:values[i][1]-values[i][0]};}).filter(function(x){return x.delta!==0;}).sort(function(a,b){return Math.abs(b.delta)-Math.abs(a.delta);});
+ var gaps=names.map(function(name,i){return {name:name,gap:values[i][1]-values[i][2]};}).filter(function(x){return x.gap>=3;}).sort(function(a,b){return b.gap-a.gap;});
+ var lead=shifts.length?'Largest recalled shifts: '+shifts.slice(0,4).map(function(x){return escapeText(x.name)+' ('+(x.delta>0?'+':'')+x.delta+')';}).join(' · '):'No movement recorded between past and present yet.';
+ var gapText=gaps.length?'Possible values/action gaps: '+gaps.slice(0,3).map(function(x){return escapeText(x.name)+' ('+x.gap+' points)';}).join(' · '):'No large positive values/action gaps marked.';
+ result.innerHTML='<strong>Compass reading</strong><p>'+lead+'</p><p>'+gapText+'</p><small>These are patterns in your own ratings, not predictions or objective scores.</small>';
+}
+function drawChart(){
+ var colors=['#999eab','#d7b55b','#73b6a5'];
+ var html='<strong>Values at a glance</strong><div class="if-compass-legend">Gray: 5 years ago · Gold: Today · Green: In action</div>';
+ names.forEach(function(name,i){
+  html+='<div class="if-compass-row"><span>'+escapeText(name)+'</span><div class="if-compass-bars">';
+  values[i].forEach(function(v,j){html+='<div title="'+escapeText(name)+': '+v+' / 10"><i style="width:'+(v*10)+'%;background:'+colors[j]+'"></i></div>';});
+  html+='</div></div>';
+ });
+ if(compared!==null&&entries[compared]){
+  var old=entries[compared];
+  html+='<div class="if-compass-compare"><strong>Compared with '+escapeText(new Date(old.date).toLocaleDateString())+' (Today ratings)</strong>';
+  names.forEach(function(name,i){
+   var delta=values[i][1]-old.scores[i][1];
+   html+='<div class="if-compass-row"><span>'+escapeText(name)+'</span><span>'+(delta>0?'+':'')+delta+' points</span></div>';
   });
-  document.getElementById("if-save-values").addEventListener("click",function(){
-    entries.push({date:new Date().toISOString(),scores:values.map(function(x){return x.slice()})});
-    try{localStorage.setItem(key,JSON.stringify(entries));showHistory()}catch(err){result.textContent="Unable to save in this browser. Try Export data."}
-  });
-  document.getElementById("if-reset-values").addEventListener("click",function(){values=defaults();draw()});
-  history.addEventListener("click",function(e){var b=e.target.closest("[data-restore]");if(!b)return;values=entries[+b.dataset.restore].scores.map(function(x){return x.slice()});draw();result.insertAdjacentHTML("beforeend","<p>Loaded a previous check-in. Adjust and save to create a new dated record.</p>");});
-  document.getElementById("if-export-values").addEventListener("click",function(){
-    var data={instrument:"Ideaflow Value Compass",version:1,labels:names,checkins:entries,current:values,exported:new Date().toISOString()};
-    var blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"}),url=URL.createObjectURL(blob),a=document.createElement("a");
-    a.href=url;a.download="ideaflow-value-compass.json";document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url)},1000);
-  });
-  draw();
-  var search=document.getElementById("if-node-search");
-  document.getElementById("if-find-node").addEventListener("click",findNode);
-  search.addEventListener("keydown",function(e){if(e.key==="Enter"){e.preventDefault();findNode()}});
-  function findNode(){
-    var q=search.value.trim().toLowerCase();if(!q)return;
-    var matches=Array.prototype.slice.call(document.querySelectorAll("#svg .node")),found=matches.find(function(n){return (n.getAttribute("aria-label")||"").toLowerCase().includes(q)});
-    if(found){found.dispatchEvent(new MouseEvent("click",{bubbles:true}));document.getElementById("land").scrollIntoView({behavior:"smooth"});search.setAttribute("aria-invalid","false")}
-    else{search.setAttribute("aria-invalid","true");search.title="No matching branch in the current map"}
-  }
-})();
-</script>
+  html+='</div>';
+ }
+ chart.innerHTML=html;
+}
+function drawHistory(){
+ if(!entries.length){history.innerHTML='<p class="none">No saved calibrations yet.</p>';return;}
+ history.innerHTML=entries.slice().reverse().map(function(e,reverseIndex){
+  var index=entries.length-1-reverseIndex;
+  return '<article><div><strong>'+escapeText(new Date(e.date).toLocaleString())+'</strong><br><small>'+names.length+' values recorded</small></div><div><button class="btn alt" data-compare="'+index+'" type="button">Compare</button> <button class="btn alt" data-restore="'+index+'" type="button">Load sliders</button></div></article>';
+ }).join("");
+}
+form.addEventListener('input',function(e){
+ var t=e.target;
+ if(!t.matches('input[type="range"]'))return;
+ var i=Number(t.dataset.i),j=Number(t.dataset.j);
+ if(!values[i]||j<0||j>2)return;
+ values[i][j]=Number(t.value);
+ t.nextElementSibling.textContent=t.value;
+ summary();drawChart();saveState.textContent='Unsaved changes — select Save to keep them.';
+});
+document.getElementById('if-save-values').addEventListener('click',function(){
+ var next=entries.concat([{date:new Date().toISOString(),scores:values.map(function(row){return row.slice();})}]);
+ try{
+  localStorage.setItem(storageKey,JSON.stringify(next));
+  entries=next;drawHistory();drawChart();
+  saveState.textContent='Saved in this browser at '+new Date().toLocaleString()+'. Export for backup.';
+ }catch(_){saveState.textContent='Browser save failed. Please export your data for backup.';}
+});
+document.getElementById('if-reset-values').addEventListener('click',function(){
+ values=names.map(function(){return [5,5,5];});compared=null;draw();
+ saveState.textContent='Sliders reset. Saved history is unchanged.';
+});
+history.addEventListener('click',function(e){
+ var c=e.target.closest('[data-compare]'),b=e.target.closest('[data-restore]');
+ if(c){
+  var ci=Number(c.dataset.compare);
+  if(!entries[ci])return;
+  compared=compared===ci?null:ci;drawChart();
+  saveState.textContent=compared===null?'Comparison closed.':'Comparing against saved ratings. Current sliders are unchanged.';
+ }else if(b){
+  var ri=Number(b.dataset.restore);
+  if(!entries[ri])return;
+  values=entries[ri].scores.map(function(row){return row.slice();});compared=null;draw();
+  saveState.textContent='Old calibration loaded into sliders. This has not created a new saved entry.';
+ }
+});
+document.getElementById('if-export-values').addEventListener('click',function(){
+ var data={instrument:'Ideaflow Value Compass',version:1,labels:names,checkins:entries,current:values,exported:new Date().toISOString()};
+ var blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+ var url=URL.createObjectURL(blob),a=document.createElement('a');
+ a.href=url;a.download='ideaflow-value-compass.json';document.body.appendChild(a);a.click();a.remove();
+ setTimeout(function(){URL.revokeObjectURL(url);},1000);
+});
+draw();
+var search=document.getElementById('if-node-search');
+var findButton=document.getElementById('if-find-node');
+if(search&&findButton){
+ findButton.addEventListener('click',findNode);
+ search.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();findNode();}});
+}
+function findNode(){
+ var q=search.value.trim().toLowerCase();if(!q)return;
+ var matches=Array.prototype.slice.call(document.querySelectorAll('#svg .node'));
+ var found=matches.find(function(n){return (n.getAttribute('aria-label')||'').toLowerCase().includes(q);});
+ if(found){
+  found.dispatchEvent(new MouseEvent('click',{bubbles:true}));
+  document.getElementById('land').scrollIntoView({behavior:'smooth'});
+  search.setAttribute('aria-invalid','false');
+ }else{search.setAttribute('aria-invalid','true');search.title='No matching branch in the current map';}
+}
+})();</script>
 <script>fetch("/api/suggest").then(r=>r.json()).then(d=>{var e=document.getElementById("if-ai-state");if(e)e.textContent=d.connected?"Live AI connected":"Offline suggestions — API key not configured";}).catch(()=>{var e=document.getElementById("if-ai-state");if(e)e.textContent="Offline suggestions";});</script>
 </body>
 </html>
